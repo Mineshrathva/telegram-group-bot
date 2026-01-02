@@ -1,4 +1,5 @@
 import os
+import asyncio
 from telegram import (
     Update,
     InlineKeyboardButton,
@@ -12,14 +13,10 @@ from telegram.ext import (
     filters,
 )
 
-# Store how many users each person added
 user_added_count = {}
-
-# Track users who already saw warning button
 warned_users = set()
 
 
-# Track new members added
 async def track_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message and update.message.new_chat_members:
         adder = update.message.from_user.id
@@ -27,7 +24,6 @@ async def track_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user_added_count[adder] = user_added_count.get(adder, 0) + 1
 
 
-# Restrict messages until user adds 5 members
 async def restrict_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
@@ -35,32 +31,31 @@ async def restrict_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.message.from_user
     chat = update.message.chat
 
-    # Admins always allowed
-    admins = [admin.user.id for admin in await chat.get_administrators()]
+    admins = [a.user.id for a in await chat.get_administrators()]
     if user.id in admins:
         return
 
-    added = user_added_count.get(user.id, 0)
-
-    if added < 5:
+    if user_added_count.get(user.id, 0) < 5:
         await update.message.delete()
 
-        # Show warning button ONLY ONCE per user
         if user.id not in warned_users:
             warned_users.add(user.id)
 
             keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("⚠️ Why message blocked?", callback_data="warn")]
+                [InlineKeyboardButton(" ", callback_data="warn")]
             ])
 
-            await context.bot.send_message(
+            msg = await context.bot.send_message(
                 chat_id=chat.id,
-                text="🔒 Messaging locked",
+                text=".",
                 reply_markup=keyboard
             )
 
+            # auto delete helper message
+            await asyncio.sleep(0.5)
+            await msg.delete()
 
-# Popup alert (NO group message)
+
 async def popup_warning(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer(
         text="🚫 You must add 5 members to start chatting.",
@@ -69,23 +64,12 @@ async def popup_warning(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def main():
-    TOKEN = os.getenv("BOT_TOKEN")
-    if not TOKEN:
-        raise RuntimeError("BOT_TOKEN not set")
+    app = ApplicationBuilder().token(os.getenv("BOT_TOKEN")).build()
 
-    app = ApplicationBuilder().token(TOKEN).build()
+    app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, track_add))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, restrict_messages))
+    app.add_handler(CallbackQueryHandler(popup_warning, pattern="warn"))
 
-    app.add_handler(
-        MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, track_add)
-    )
-    app.add_handler(
-        MessageHandler(filters.TEXT & ~filters.COMMAND, restrict_messages)
-    )
-    app.add_handler(
-        CallbackQueryHandler(popup_warning, pattern="warn")
-    )
-
-    print("🤖 Bot is running...")
     app.run_polling()
 
 
