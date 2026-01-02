@@ -1,14 +1,22 @@
 import os
-from telegram import Update
+from telegram import (
+    Update,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+)
 from telegram.ext import (
     ApplicationBuilder,
     MessageHandler,
+    CallbackQueryHandler,
     ContextTypes,
     filters,
 )
 
 # Store how many users each person added
 user_added_count = {}
+
+# Track users who already saw warning button
+warned_users = set()
 
 
 # Track new members added
@@ -27,27 +35,37 @@ async def restrict_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.message.from_user
     chat = update.message.chat
 
-    # ✅ FIXED ADMIN FETCH (await correctly)
+    # Admins always allowed
     admins = [admin.user.id for admin in await chat.get_administrators()]
-
     if user.id in admins:
         return
 
     added = user_added_count.get(user.id, 0)
 
     if added < 5:
-        try:
-            await update.message.delete()
+        await update.message.delete()
+
+        # Show warning button ONLY ONCE per user
+        if user.id not in warned_users:
+            warned_users.add(user.id)
+
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("⚠️ Why message blocked?", callback_data="warn")]
+            ])
+
             await context.bot.send_message(
                 chat_id=chat.id,
-                text=(
-                    f"🚫 {user.first_name}, add *5 members* to chat.\n"
-                    f"Progress: {added}/5"
-                ),
-                parse_mode="Markdown",
+                text="🔒 Messaging locked",
+                reply_markup=keyboard
             )
-        except Exception:
-            pass
+
+
+# Popup alert (NO group message)
+async def popup_warning(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer(
+        text="🚫 You must add 5 members to start chatting.",
+        show_alert=True
+    )
 
 
 def main():
@@ -62,6 +80,9 @@ def main():
     )
     app.add_handler(
         MessageHandler(filters.TEXT & ~filters.COMMAND, restrict_messages)
+    )
+    app.add_handler(
+        CallbackQueryHandler(popup_warning, pattern="warn")
     )
 
     print("🤖 Bot is running...")
