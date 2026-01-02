@@ -27,8 +27,9 @@ async def restrict_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.message.from_user
     chat = update.message.chat
 
-    # Get admin IDs
-   admins = [admin.user.id for admin in await chat.get_administrators()]
+    # ✅ FIXED ADMIN FETCH (await correctly)
+    admins = [admin.user.id for admin in await chat.get_administrators()]
+
     if user.id in admins:
         return
 
